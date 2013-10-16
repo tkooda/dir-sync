@@ -1,0 +1,145 @@
+#!/usr/bin/python
+
+## tkooda : 2013-07-25 : v0.01 : dir-sync-slave
+
+## Recursively monitor a directory with inotify and write serialized events to stdout
+
+
+import os
+import sys
+import time
+import pyinotify
+from json import dumps
+
+
+MASK = pyinotify.IN_ATTRIB \
+    | pyinotify.IN_CLOSE_WRITE \
+    | pyinotify.IN_MOVED_FROM \
+    | pyinotify.IN_MOVED_TO \
+    | pyinotify.IN_DELETE \
+    | pyinotify.IN_Q_OVERFLOW \
+    | pyinotify.IN_ONLYDIR \
+    | pyinotify.IN_DONT_FOLLOW
+# unused:
+#    | pyinotify.IN_CREATE \ # wait for IN_CLOSE_WRITE instead
+#    | pyinotify.IN_MOVE_SELF \
+#    | pyinotify.IN_DELETE_SELF \
+
+MASK = pyinotify.ALL_EVENTS # DURING DEVELOPMENT ONLY
+
+
+try:
+    DEBUG = int( os.getenv( "DEBUG" ) )
+except:
+    DEBUG = 0
+
+
+def bail( s, err = 1 ):
+    print >>sys.stderr, s
+    sys.exit( err )
+
+
+def do_debug( level, *args ):
+    try:
+        if level <= DEBUG:
+            print >>sys.stderr, "DEBUG: (%d): SLAVE: %s" % ( level, " : ".join( str(x) for x in args ) )
+            sys.stderr.flush()
+    except:
+        pass
+
+
+## write serialized dict to stdout ..
+def write_serialized( event ):
+    do_debug( 9, "event", event )
+    print dumps( { "path": event.path,
+                   "name": event.name,
+                   "pathname": event.pathname,
+                   "maskname": event.maskname,
+                   "mask": event.mask,
+                   "dir": event.dir,
+                   "wd": event.wd,
+                   "cookie": getattr( event, "cookie", None ),
+                   "time_slave": time.time() } )
+    sys.stdout.flush()
+
+
+class PTmp( pyinotify.ProcessEvent ):
+    def process_IN_ATTRIB( self, event ):
+        do_debug( 8, "IN_ATTRIB", event.pathname )
+        write_serialized( event )
+    
+    def process_IN_CLOSE_WRITE( self, event ):
+        do_debug( 8, "IN_CLOSE_WRITE", event.pathname )
+        write_serialized( event )
+    
+    def process_IN_MOVED_FROM( self, event ):
+        do_debug( 8, "IN_MOVED_FROM", event.pathname )
+        write_serialized( event )
+    
+    def process_IN_MOVED_TO( self, event ):
+        do_debug( 8, "IN_MOVED_TO", event.pathname )
+        write_serialized( event )
+    
+    def process_IN_CREATE( self, event ):
+        do_debug( 8, "IN_CREATE", event.pathname )
+        write_serialized( event )
+    
+    def process_IN_DELETE( self, event ):
+        do_debug( 8, "IN_DELETE", event.pathname )
+        write_serialized( event )
+    
+## tkooda : 2013-07-26 : already handled by regular DELETE / MOVE
+    def process_IN_DELETE_SELF( self, event ):
+        do_debug( 8, "IN_DELETE_SELF", event.pathname )
+        write_serialized( event )
+    
+    def process_IN_MOVE_SELF( self, event ):
+        do_debug( 8, "IN_MOVE_SELF", event.pathname )
+        write_serialized( event )
+    
+    def process_IN_Q_OVERFLOW( self, event ):
+        do_debug( 8, "IN_Q_OVERFLOW", event.pathname )
+        write_serialized( event )
+
+
+
+if __name__ == '__main__':
+    if len( sys.argv ) != 2:
+        bail( "usage: %s <local directory to monitor>" % sys.argv[ 0 ], 2 )
+    
+    time_start = time.time()
+    
+    print dumps( { "version": 1,
+                   "status": "starting",
+                   "time_slave": time.time() } ) # banner before init delay
+    sys.stdout.flush()
+    
+    wm = pyinotify.WatchManager()
+    notifier = pyinotify.Notifier( wm, PTmp() )
+    wdd = wm.add_watch( sys.argv[ 1 ], MASK, rec=True, auto_add=True )
+    
+    if not wdd:
+        bail( "ERROR: could not watch:" + sys.argv[ 1 ] )
+    
+    for d in wdd:
+        do_debug( 9, "watching", d )
+    
+    print dumps( { "watch_count": len( wdd ),
+                   "time_startup": time.time() - time_start,
+                   "time_slave": time.time() } ) # banner
+    sys.stdout.flush()
+    
+    while True: # loop forever
+        try:
+            # process the queue of events
+            notifier.process_events()
+            
+            if notifier.check_events():
+                # read notified events and enqeue them
+                notifier.read_events()
+        
+        except KeyboardInterrupt:
+            # destroy the inotify's instance on this interrupt (stop monitoring)
+            notifier.stop()
+            break
+

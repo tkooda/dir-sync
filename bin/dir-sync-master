@@ -1,0 +1,256 @@
+#!/usr/bin/python
+
+## tkooda : 2013-07-25 : v0.01 : dir-sync-master
+
+## keep local / remote directories in sync
+
+
+import os
+import sys
+import pyinotify
+from json import loads
+import subprocess
+import threading
+import time
+import Queue
+
+
+shutdown_event = threading.Event()
+event_queue = Queue.Queue()
+
+
+try:
+    DEBUG = int( os.getenv( "DEBUG" ) )
+except:
+    DEBUG = 0
+
+
+def bail( s, err = 1 ):
+    print >>sys.stderr, s
+    sys.exit( err )
+
+
+def do_debug( level, *args ):
+    try:
+        if level <= DEBUG:
+            print >>sys.stderr, "DEBUG: (%d): MASTER: %s" % ( level, " : ".join( str(x) for x in args ) )
+            sys.stderr.flush()
+    except:
+        pass
+
+
+def process_queue_item( item ):
+    try:
+        
+        
+        return True
+    except:
+        pass
+    
+    return False
+
+
+
+def push_file( src_url, dst_url ):
+    if not src_url.startswith( sys.argv[ 1 ] ):
+        do_debug( 1, "push_file()", "ERROR: startswith wrong string", src_url )
+        return 1 # fail
+    
+    src_url_sub = src_url[ len( sys.argv[ 1 ] ) : ].lstrip( "/" ) # TODO: make safer
+    dst_url_fixed = os.path.join( dst_url, src_url_sub )
+    ## TODO: add dst_url_fixed checks here
+    if not dst_url_fixed.startswith( dst_url ):
+        do_debug( 1, "push_file()", "ERROR: invalid dst_url_fixed", dst, dst_url_fixed )
+        return 2 # fail
+    
+    ## WARNING: test if it fails gracefully with a meaningful error if both src_url and dst_url are remote
+    
+    args = [ "echo", "rsync", "-i", src_url, dst_url_fixed ]
+    print args
+    print
+    
+    ret = subprocess.call( args, stdout=subprocess.PIPE )
+    return ret
+
+
+def secure_cookie( item ):
+    return "/".join( [ item[ "host" ], item[ "cookie" ] ] ) # FIXME: username too!?  -they're different namespaces for each username!!
+
+
+def push_file_to_dests( src_url, dst ):
+    for dest in sys.argv[ 2: ]: # WARNING: this will repeat all destinations even if only one fails
+        ret = push_file( src_url, dst )
+        if ret:
+            do_debug( 5, "push_file_to_dests()", "push_file() returned error", ret )
+            return ret
+
+
+## TODO :
+def threaded_queue_worker():
+    mkurl = lambda h, p: ":".join( [ h, p ] ) if h != None else p
+    ignore_events = [] # events that we acted upon (so we should ignore the events they cause themselves)
+    moving_cookies = {}
+    
+    
+    while not shutdown_event.is_set():
+        item = event_queue.get()
+        do_debug( 0, "threaded_queue_worker()", "process queue item", item )
+        
+#        if "version" in item:
+#            event_queue.task_done() # ignore initial banner
+#            continue
+        
+        try:
+            if item[ "maskname" ] == "IN_MOVED_FROM":
+                moving_cookies[ secure_cookie( item ) ] = item
+            
+            elif item[ "maskname" ] == "IN_MOVED_TO":
+                if not secure_cookie( item ) in moving_cookies:
+                    # moved into a watched directory from a non-watched directory, treat as a creation.
+                    ret = push_file_to_dests( 
+                        
+
+                moving_cookies[ secure_cookie( item ) ] = item ....... XXXX FIXME RESUME HERE
+                
+                
+                
+                
+
+                if not item[ "name" ].startswith( "." ):
+                    do_debug( 6, "threaded_queue_worker()", "skipping non-dotfile", item[ "name" ] )
+                    continue # ignore rsync temp file writing
+            
+            elif item[ "maskname" ] == "IN_CLOSE_WRITE":
+                if item[ "name" ].startswith( "." ):
+                    do_debug( 6, "threaded_queue_worker()", "skipping dotfile", item[ "name" ] )
+                    continue # ignore rsync temp file writing
+                
+                ## XXX FIXME: run this for each OTHER destination:   (e.g. not to the DST host+path that is this event)
+                
+                ## skip this event if we see a "match" in the ignore_events[] (because WE caused it!)
+                
+                
+                
+                for dest in sys.argv[ 2: ]: # WARNING: this will repeat all destinations even if only one fails
+                    ret = push_file( mkurl( item[ "host" ], item[ "pathname" ] ), dest )
+                    if ret:
+                        do_debug( 5, "threaded_queue_worker()", "subprocess returned", ret )
+                        raise # we got an error, retry
+                
+                # event was sucessfully processed, save it to our "ignore" list so we can skip the soon-to-be-incoming events that it caused ..
+                item[ "time_master" ] = time.time()
+                ignore_events.append( item )
+                
+                # remove the event from the queue ..
+                event_queue.task_done()
+                
+                
+                ## debug: print out current event queue:
+                with event_queue.mutex:
+                    for qi in event_queue.queue:
+                        do_debug( 3, "threaded_queue_worker()", "current event_queue items", qi )
+                
+                # copy this queue event item to our own internal "recently_processed_queue_items" queue WITH _OUR_ own timestamp so that we can use it to determine if we should ignore an incoming inotify event (because WE caused it! -with rsync/sftp/etc)
+                # ..these "recently_processed_queue_items" will be "consumed" as we eventually see the incoming related inotify events from the remote system
+                # use our internal timestamp to make sure that they're only good for some period of time (e.g. the average amount of time expected for network delays??)
+                
+                
+                
+                time.sleep( 5 ) # DEBUG
+        except:
+            do_debug( 5, "threaded_queue_worker()", "ERROR", "could not process item", item )
+            import traceback
+            traceback.print_exc( file=sys.stderr )
+            sys.stderr.flush()
+            pass
+
+
+
+
+## works ..
+def threaded_client_monitor( url ):
+    try:
+        host, path = url.split( ":", 1 )
+    except:
+        host = None # local
+        path = url
+        pass
+    
+    seconds = 1
+    last_failed = 0
+    
+    while not shutdown_event.is_set(): # retry connect forever ..
+        ## FIXME: probably re-run sync for this one remote server because either side might have had changes occurr during the network disconnect
+        ##  - possibly handle running the sync up front here (for initial run, and for after disconnect) ?
+        
+        p = subprocess.Popen( [ "/home/tkooda/tmp/git/ds/dir-sync/dir-sync-slave", path ],
+                              bufsize=0, # 0=no_buffer, 1=line-buffered, unset=OS?
+                              stdout=subprocess.PIPE )
+        
+        for line in iter( p.stdout.readline, b'' ):
+            try:
+                s = loads( line.rstrip() )
+                s[ "host" ] = host # override any "host" set by client
+                do_debug( 7, "process_queue_item()", "parsed incoming event", s )
+                sys.stdout.flush()
+                
+                ## add event to event queue for processing by the sync worker thread ..
+                event_queue.put( s )
+                
+            except KeyboardInterrupt:
+                do_debug( 1, "process_queue_item()", "KeyboardInterrupt" ) # never get's this event?
+            
+            except:
+                do_debug( 1, "process_queue_item()", "ERROR", "parsing line", line )
+                pass
+        
+        if shutdown_event.is_set():
+            return
+        
+        if last_failed and last_failed + 60 * 60 < int( time.time() ):
+            do_debug( 7, "process_queue_item()", "resetting seconds", seconds )
+            seconds = 1 # reset sleep after an hour of no disconnects
+        
+        if last_failed != 0:
+            print >>sys.stderr, "ERROR: process_queue_item(): client last disconnected %d seconds ago: %s" % ( int( time.time() - last_failed ), url )
+        
+        print >>sys.stderr, "ERROR: process_queue_item(): client disconnected, sleeping %d seconds before retrying: %s" % ( seconds, url )
+        
+        last_failed = int( time.time() )
+        time.sleep( seconds ) # sleep before attempting to reconnect
+        if seconds < 60:
+            seconds = seconds * 2 # exponential backoff up to 1 minute
+        
+
+
+## works..
+def main():
+    if len( sys.argv ) < 3:
+        bail( "usage: %s <local directory to sync> <URL to remote host to sync..>" % sys.argv[ 0 ], 2 )
+    
+    threads = []
+    
+    ## start local queue monitor (sync) thread ..
+    t = threading.Thread( target=threaded_queue_worker )
+    t.daemon = True # kill threads when main thread exits??
+    threads.append( t )
+    t.start()
+    
+    ## spawn local / remote inotify event monitoring threads ..
+    for url in sys.argv[ 1: ]:
+        t = threading.Thread( target=threaded_client_monitor, args=( url, ) )
+        t.daemon = True # kill threads when main thread exits??
+        threads.append( t )
+        t.start()
+    
+    try:
+        while not shutdown_event.is_set(): # loop forever
+            for t in threads:
+#                do_debug( 0, "thread", t )
+                t.join( timeout=1.0 ) # for faster response to signals
+    except ( KeyboardInterrupt, SystemExit ):
+        shutdown_event.set()
+
+
+if __name__ == '__main__':
+    main()
